@@ -3,9 +3,9 @@
 # DATE:   2023-02-24
 # UPDATE: 2023-03-12
 # PURPOSE:
-#   - MercariAppで作成された価格帯棒グラフ画像(jpeg)を取得する
+#   - receive下の価格帯棒グラフ画像を指定されたLINEに送信する
 # USAGE:
-#   - ./get_jpeg.sh
+#   - ./post_jpeg.sh
 
 
 ### 変数宣言 ###
@@ -15,6 +15,7 @@ readonly SCRIPT_NAME=$(basename $0)
 readonly LOG_DIR=$(cd $APP_DIR/logs; pwd)
 readonly RECEIVE_DIR=$(cd $APP_DIR/receive; pwd)
 readonly POSTED_DIR=$(cd $APP_DIR/posted; pwd)
+readonly CONF_DIR=$(cd $APP_DIR/config; pwd)
 readonly TMP_DIR=$(cd $APP_DIR/tmp; pwd)
 readonly SRC_DIR=$(cd $APP_DIR/src; pwd)
 readonly YYYYMMDD=$(date '+%Y%m%d')
@@ -42,7 +43,7 @@ normal_end() {
     exit 0
 }
 
-# 処理異常終了用関数
+# 処理異常終了用完了
 abend() {
     logger "========== ABEND =========="
     exit 1
@@ -57,7 +58,8 @@ logger "MERCARIAPP_DIR: $MERCARIAPP_DIR"
 logger "SCRIPT_NAME: $SCRIPT_NAME"
 logger "RECEIVE_DIR: $RECEIVE_DIR"
 logger "POSTED_DIR: $POSTED_DIR"
-logger "SCRIPT_NAME: $SCRIPT_NAME"
+logger "CONF_DIR: $CONF_DIR"
+logger "TMP_DIR: $TMP_DIR"
 logger "LOG_DIR: $LOG_DIR"
 logger "SRC_DIR: $SRC_DIR"
 logger "YYYYMMDD: $YYYYMMDD"
@@ -65,30 +67,33 @@ logger "HHMMSS: $HHMMSS"
 logger "LOG_NAME: $LOG_NAME"
 logger "output_log_file: $LOG_DIR/bash/$LOG_NAME.txt"
 
-### 主処理 ###
-# (1) MercariApp1/graphと、LINEAPI/postedを比較し、差分ファイル名をテキスト出力
-logger "[diff] $MERCARIAPP_DIR/graph $POSTED_DIR > $TMP_DIR/get_jpeg_${YYYYMMDD}_${HHMMSS}.txt"
-diff -qr $MERCARIAPP_DIR/graph $POSTED_DIR > $TMP_DIR/get_jpeg_${YYYYMMDD}_${HHMMSS}.txt
+# token.txtからLINE APIトークンを取得
+readonly api_token=$(sed -n '3p' $CONF_DIR/token.txt)
 
-# (2) 差分ファイルがあるか確認
-diff_num=$(cat $TMP_DIR/get_jpeg_${YYYYMMDD}_${HHMMSS}.txt | wc -l)
-logger "diff_num: $diff_num"
-if [ $diff_num -eq 0 ]; then
-  rm -rf $TMP_DIR/*
+### 主処理 ###
+mkdir -p $POSTED_DIR
+
+# (1) receive下のファイル件数確認
+readonly receive_num=$(ls -1 $RECEIVE_DIR | wc -l)
+logger "receive_num: $receive_num"
+if [ $receive_num -eq 0 ]; then
   normal_end
 fi
 
-# (3) (1)で出力されたファイルをLINEAPI/receiveにコピー
+# (2) receive下のファイル名をテキスト出力 
+ls $RECEIVE_DIR/* > $TMP_DIR/receive_jpeg_${YYYYMMDD}_${HHMMSS}.txt
+
+# (3) receive下のファイルをLINEに送信
 while read line
 do
-  graph_filename=$(echo $line | sed -e s/^[^:]*:// | sed -e 's/ //g')
+  graph_filename=$(echo $line)
 
-  logger "[copy] $MERCARIAPP_DIR/graph/$graph_filename $RECEIVE_DIR"
-  cp $MERCARIAPP_DIR/graph/$graph_filename $RECEIVE_DIR
-done < $TMP_DIR/get_jpeg_${YYYYMMDD}_${HHMMSS}.txt
-
-# (3) tmp下のファイルを全て削除
-rm $TMP_DIR/*
+  logger "[post] $graph_filename"
+  curl -X POST -H "Authorization: Bearer $api_token" -F "message=$graph_filename" -F "imageFile=@$graph_filename" https://notify-api.line.me/api/notify
+  
+  logger "[move] $graph_filename $POSTED_DIR/"
+  mv $graph_filename $POSTED_DIR/
+done < $TMP_DIR/receive_jpeg_${YYYYMMDD}_${HHMMSS}.txt
 
 # 処理正常終了
 normal_end
